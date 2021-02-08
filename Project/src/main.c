@@ -7,21 +7,41 @@
 #include "stm32l1xx_ll_bus.h"
 #include "stm32l1xx_ll_utils.h"
 #include "stm32l1xx_ll_system.h"
-#include "stm32l152_glass_lcd.h"
 #include "stm32l1xx_ll_tim.h"
 
-// PA1:Rising , PA2:Trigger , PA3:Falling 
-
-
 void SystemClock_Config(void);
+void Call_distance(void);
 void Show_Stop_mode(void); //set show led lcd and buzzer for Stop mode
 void Show_Pass_mode(void); //set show led lcd and buzzer for Pass mode
 void counting_sec(void);
-void GPIO_Config(void);
-void cal_distance(void);
+
+void TIMBase_Config(void)
+{
+	LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_TIM2);
+	LL_TIM_EnableCounter(TIM2);
+}
 
 void GPIO_Config(void)
 {
+		LL_GPIO_InitTypeDef hcsr04_gpio;
+		
+		LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_GPIOA);
+		
+		hcsr04_gpio.Mode = LL_GPIO_MODE_OUTPUT;
+		hcsr04_gpio.Pull = LL_GPIO_PULL_NO;
+		hcsr04_gpio.Pin = LL_GPIO_PIN_2;
+		hcsr04_gpio.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
+		hcsr04_gpio.Speed = LL_GPIO_SPEED_FREQ_VERY_HIGH;
+		LL_GPIO_Init(GPIOA, &hcsr04_gpio);
+	
+		hcsr04_gpio.Mode = LL_GPIO_MODE_INPUT;
+		hcsr04_gpio.Pin = LL_GPIO_PIN_1;
+		hcsr04_gpio.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
+		hcsr04_gpio.Speed = LL_GPIO_SPEED_FREQ_VERY_HIGH;
+		LL_GPIO_Init(GPIOA, &hcsr04_gpio);
+	
+		LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_2);
+	
 		LL_GPIO_InitTypeDef timic_gpio;
 		LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_GPIOA);
 		//GPIO_Config PA1 as alternate
@@ -67,161 +87,94 @@ void GPIO_Config(void)
 		GPIO_InitSt.Mode = LL_GPIO_MODE_OUTPUT;
 		GPIO_InitSt.Pin = LL_GPIO_PIN_5;
 		LL_GPIO_Init(GPIOA, &GPIO_InitSt);
-	
-	
-}
-	
-void TIMx_IC_Config(void)
-{
-		LL_TIM_IC_InitTypeDef timic;
-	
-		LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_TIM2);
-		
-		//TIM_IC Configure CH2
-		timic.ICActiveInput = LL_TIM_ACTIVEINPUT_DIRECTTI;
-		timic.ICFilter = LL_TIM_IC_FILTER_FDIV1_N2;
-		timic.ICPolarity = LL_TIM_IC_POLARITY_RISING;
-		timic.ICPrescaler = LL_TIM_ICPSC_DIV1;
-		LL_TIM_IC_Init(TIM2, LL_TIM_CHANNEL_CH2, &timic);
-		
-		NVIC_SetPriority(TIM2_IRQn, 0);
-		
-		NVIC_EnableIRQ(TIM2_IRQn);
-		LL_TIM_EnableIT_CC2(TIM2);
-		LL_TIM_CC_EnableChannel(TIM2, LL_TIM_CHANNEL_CH2);
-		
-		//TIM_IC Configure CH4
-		timic.ICActiveInput = LL_TIM_ACTIVEINPUT_DIRECTTI;
-		timic.ICFilter = LL_TIM_IC_FILTER_FDIV1_N2;
-		timic.ICPolarity = LL_TIM_IC_POLARITY_FALLING;
-		timic.ICPrescaler = LL_TIM_ICPSC_DIV1;
-		LL_TIM_IC_Init(TIM2, LL_TIM_CHANNEL_CH4, &timic);
-		
-		NVIC_SetPriority(TIM2_IRQn, 0);
-		
-		NVIC_EnableIRQ(TIM2_IRQn);
-		LL_TIM_EnableIT_CC4(TIM2);
-		LL_TIM_CC_EnableChannel(TIM2, LL_TIM_CHANNEL_CH4);
-		
-		
-		LL_TIM_EnableCounter(TIM2);
 }
 
-uint16_t Val1 = 0;
-uint16_t Val2 = 0;
-uint16_t Echo_pulse = 0;
+uint16_t rise_timestamp = 0;
+uint16_t fall_timestamp = 0;
+uint16_t up_cycle = 0;
+
+uint8_t state = 0;
 float period = 0;
 float distance = 0;
-uint8_t state = 0;
 
 uint32_t TIM2CLK;
 uint32_t PSC;
-uint32_t IC4PSC;
 
 char disp_str[7];
-
-
 int main()
 {
-	
 		SystemClock_Config();
-		TIMx_IC_Config();
 		GPIO_Config();
-		//send trigger
-		LL_GPIO_SetOutputPin(GPIOA,LL_GPIO_PIN_2);
-		LL_mDelay(1);
-		LL_GPIO_ResetOutputPin(GPIOA,LL_GPIO_PIN_2);
-		LCD_GLASS_Init();
-		
-		while(1)
-		{
-			cal_distance();
-			
+		TIMBase_Config();
+
+		while(1){
+			Call_distance();
 			if(distance >= 0.1){
-				LL_GPIO_SetOutputPin(GPIOB,LL_GPIO_PIN_7);
+				LL_GPIO_SetOutputPin(GPIOB,LL_GPIO_PIN_6);
+				LL_GPIO_ResetOutputPin(GPIOB,LL_GPIO_PIN_7);
 			}
 			else{
-				LL_GPIO_SetOutputPin(GPIOB,LL_GPIO_PIN_6);
-			}
-			state = 0;
-			
-			/*if(uhICIndex == 2)
-			{
-					//Period calculation
-					PSC = LL_TIM_GetPrescaler(TIM2) + 1;
-					TIM2CLK = SystemCoreClock / PSC;
-					IC1PSC = __LL_TIM_GET_ICPSC_RATIO(LL_TIM_IC_GetPrescaler(TIM2, LL_TIM_CHANNEL_CH1));
-					
-					period = (uwDiff*(PSC) * 1.0*10e3) / (TIM2CLK *IC1PSC * 1.0); //calculate uptime period ms
-					uhICIndex = 0;
-			}*/
-		}
-}
-
-void TIM2_IRQHandler(void)
-{	  
-	if(state == 0)
-	{
-		if(LL_TIM_IsActiveFlag_CC2(TIM2) == SET)
-		{
-			LL_TIM_ClearFlag_CC2(TIM2);
-			Val1 = LL_TIM_IC_GetCaptureCH2(TIM2);
-			state = 1;
-		}
-	}		
-	else if(state == 1)
-	{
-		if(LL_TIM_IsActiveFlag_CC4(TIM2) == SET)
-		{
-			LL_TIM_ClearFlag_CC4(TIM2);
-			Val2 = LL_TIM_IC_GetCaptureCH4(TIM2);
-			if(Val2 > Val1)
-						Echo_pulse = Val2 - Val1;
-			else if(Val2 < Val1)
-						Echo_pulse = ((LL_TIM_GetAutoReload(TIM2) - Val1) + Val2) + 1;
-			state = 2;
+				LL_GPIO_SetOutputPin(GPIOB,LL_GPIO_PIN_7);
+				LL_GPIO_ResetOutputPin(GPIOB,LL_GPIO_PIN_6);}
 		}
 	}
-	
-	/*if(LL_TIM_IsActiveFlag_CC1(TIM2) == SET)
-		{
-			LL_TIM_ClearFlag_CC1(TIM2);
-				//Detect 1st rising edge
-			if(uhICIndex == 0)
-			{
-				uwIC1 = LL_TIM_IC_GetCaptureCH1(TIM2);
-				uhICIndex = 1;
-			}
-			//Detect 2nd rising edge
-			else if(uhICIndex == 1)
-			{
-					uwIC2 = LL_TIM_IC_GetCaptureCH1(TIM2);
-					
-					if(uwIC2 > uwIC1)
-						uwDiff = uwIC2 - uwIC1;
-					else if(uwIC2 < uwIC1)
-						uwDiff = ((LL_TIM_GetAutoReload(TIM2) - uwIC1) + uwIC2) + 1;
-					uhICIndex = 2;
+			
 
-			}*/
 
-}
-
-void cal_distance(void){
-	
-	if(state == 2)
+void Call_distance(void){
+	switch(state)
 			{
-				PSC = LL_TIM_GetPrescaler(TIM2) + 1;
-				TIM2CLK = SystemCoreClock / PSC;
-				IC4PSC = __LL_TIM_GET_ICPSC_RATIO(LL_TIM_IC_GetPrescaler(TIM2, LL_TIM_CHANNEL_CH4));
-				period = (Echo_pulse*(PSC) * 1.0) / (TIM2CLK *IC4PSC * 1.0); //calculate uptime period (s) as PA3
-				distance = period*340/2;//calculate distance (m) 
-				//state = 0;
+				case 0:
+					//Trigger measurement
+					LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_2);
+					LL_mDelay(1);
+					LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_2);
+					state = 1;
+				break;
 				
+				case 1:
+					if(LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_1))
+					{
+						rise_timestamp = LL_TIM_GetCounter(TIM2);
+						state = 2;
+					}
+				break;
+					
+				case 2:
+					if(LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_1) == RESET)
+					{
+						fall_timestamp = LL_TIM_GetCounter(TIM2);
+						//Calculate uptime
+						if(fall_timestamp > rise_timestamp)
+						{
+							up_cycle = fall_timestamp - rise_timestamp;
+						}
+						else if(fall_timestamp < rise_timestamp)
+						{
+							up_cycle = (LL_TIM_GetAutoReload(TIM2) - rise_timestamp) + fall_timestamp + 1; 
+						}
+						else
+						{
+							//cannot measure at this freq
+							up_cycle = 0;
+						}
+						
+						if(up_cycle != 0)
+						{
+							PSC = LL_TIM_GetPrescaler(TIM2) + 1;
+							TIM2CLK = SystemCoreClock / PSC;
+							
+							period = (up_cycle*(PSC) * 1.0) / (TIM2CLK * 1.0); //calculate uptime period
+							distance = (period * 340) / 2; //meter unit
+						}
+						state = 0;
+					}
+				break;
+					
 			}
-}
+	}
 
-void counting_sec(void) //counting number
+	void counting_sec(void) //counting number
 {
 	for (int i=10;i>0;--i)
 	{
@@ -277,7 +230,6 @@ void Show_Pass_mode(void)
 	sprintf(disp_str,"    ");
 	LCD_GLASS_DisplayString((uint8_t*)disp_str);
 }
-
 
 void SystemClock_Config(void)
 {
