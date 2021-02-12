@@ -10,10 +10,11 @@
 #include "stm32l1xx_ll_tim.h"
 
 void SystemClock_Config(void);
-void Call_distance(void);
-void Show_Stop_mode(void); //set show led lcd and buzzer for Stop mode
-void Show_Pass_mode(void); //set show led lcd and buzzer for Pass mode
-void counting_sec(void);
+float Call_distance();
+void Stop_mode(void); 
+void Pass_mode(void); 
+void countTime(void);
+void countBuzzer(void);
 
 void TIMBase_Config(void)
 {
@@ -71,19 +72,23 @@ void GPIO_Config(void)
 		GPIO_InitSt.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
 		GPIO_InitSt.Pull = LL_GPIO_PULL_NO;
 		GPIO_InitSt.Speed = LL_GPIO_SPEED_FREQ_HIGH;
-		//set input mode for PA12
+		//switch
 		GPIO_InitSt.Mode = LL_GPIO_MODE_INPUT;
-		GPIO_InitSt.Pin = LL_GPIO_PIN_12;
+		GPIO_InitSt.Pin = LL_GPIO_PIN_0;
 		LL_GPIO_Init(GPIOA, &GPIO_InitSt);
-		//set output mode for PB6,7,5
+		//set output mode for PB 3,4,5
 		GPIO_InitSt.Mode = LL_GPIO_MODE_OUTPUT;
-		GPIO_InitSt.Pin = LL_GPIO_PIN_6;
+		GPIO_InitSt.Pin = LL_GPIO_PIN_3;
 		LL_GPIO_Init(GPIOB, &GPIO_InitSt);
 	
 		GPIO_InitSt.Mode = LL_GPIO_MODE_OUTPUT;
-		GPIO_InitSt.Pin = LL_GPIO_PIN_7;
+		GPIO_InitSt.Pin = LL_GPIO_PIN_4;
 		LL_GPIO_Init(GPIOB, &GPIO_InitSt);
-	
+		
+		GPIO_InitSt.Mode = LL_GPIO_MODE_OUTPUT;
+		GPIO_InitSt.Pin = LL_GPIO_PIN_5;
+		LL_GPIO_Init(GPIOB, &GPIO_InitSt);
+		//buzzer PA5
 		GPIO_InitSt.Mode = LL_GPIO_MODE_OUTPUT;
 		GPIO_InitSt.Pin = LL_GPIO_PIN_5;
 		LL_GPIO_Init(GPIOA, &GPIO_InitSt);
@@ -96,33 +101,46 @@ uint16_t up_cycle = 0;
 uint8_t state = 0;
 float period = 0;
 float distance = 0;
-
+int done = 0;
 uint32_t TIM2CLK;
 uint32_t PSC;
 
-char disp_str[7];
 int main()
 {
 		SystemClock_Config();
 		GPIO_Config();
 		TIMBase_Config();
-
+	
+		
 		while(1){
+			//click button
 			Call_distance();
-			if(distance >= 0.1){
-				LL_GPIO_SetOutputPin(GPIOB,LL_GPIO_PIN_6);
-				LL_GPIO_ResetOutputPin(GPIOB,LL_GPIO_PIN_7);
+			if(LL_GPIO_IsInputPinSet(GPIOA,LL_GPIO_PIN_0) == 1){
+					//check if PB5 not enable then enable PB5
+					
+					//if PB5 enable then disable PB4
+					if(LL_GPIO_IsOutputPinSet(GPIOB,LL_GPIO_PIN_5) == 0){
+							countBuzzer();
+					}
+			}
+			
+			if(distance > 0.1){
+					Stop_mode();
 			}
 			else{
-				LL_GPIO_SetOutputPin(GPIOB,LL_GPIO_PIN_7);
-				LL_GPIO_ResetOutputPin(GPIOB,LL_GPIO_PIN_6);}
+					Pass_mode();
+					//break;
+			}
 		}
-	}
-			
 
+}
 
-void Call_distance(void){
-	switch(state)
+float Call_distance(){
+	
+	done = 0;
+	while(!done)
+	{
+			switch(state)
 			{
 				case 0:
 					//Trigger measurement
@@ -168,67 +186,57 @@ void Call_distance(void){
 							distance = (period * 340) / 2; //meter unit
 						}
 						state = 0;
+						done = 1;
 					}
 				break;
 					
 			}
-	}
+			__NOP();
+		}
+			
+		return distance;
+}
 
-	void counting_sec(void) //counting number
+void countBuzzer(void){
+		for (int i=5;i>0;--i)
+	{
+		LL_mDelay(500);
+		LL_GPIO_SetOutputPin(GPIOA,LL_GPIO_PIN_5);
+		LL_mDelay(500);
+		LL_GPIO_ResetOutputPin(GPIOA,LL_GPIO_PIN_5);
+	}
+	LL_GPIO_SetOutputPin(GPIOB,LL_GPIO_PIN_5);
+}
+
+	void countTime(void) //counting Time
 {
 	for (int i=10;i>0;--i)
 	{
-		sprintf(disp_str,"PASS%d",i); 
-		LCD_GLASS_DisplayString((uint8_t*)disp_str);
-		LL_mDelay(800);
-		
-		//reset lcd showing	
-		sprintf(disp_str,"      ");
-		LCD_GLASS_DisplayString((uint8_t*)disp_str);
+		LL_mDelay(500);
+		LL_GPIO_SetOutputPin(GPIOA,LL_GPIO_PIN_5);
+		LL_mDelay(500);
+		LL_GPIO_ResetOutputPin(GPIOA,LL_GPIO_PIN_5);
 	}
+	
 }
 
-void Show_Stop_mode(void) //set show led lcd and buzzer for Stop mode
+void Stop_mode(void) 
 {
-	//show "stop" at lcd
-	sprintf(disp_str,"Stop"); 
-	LCD_GLASS_DisplayString((uint8_t*)disp_str);
-	//switch status PB 6 ,7
-	LL_GPIO_TogglePin(GPIOB, LL_GPIO_PIN_6);
-	LL_GPIO_TogglePin(GPIOB, LL_GPIO_PIN_7);
-	//enable led at PB6 and disable led at PB7
-	LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_6);
-	LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_7);
-	LL_mDelay(100);
-	//reset lcd showing	
-	sprintf(disp_str,"    ");
-	LCD_GLASS_DisplayString((uint8_t*)disp_str);
+	LL_GPIO_ResetOutputPin(GPIOA,LL_GPIO_PIN_5);
+	LL_GPIO_ResetOutputPin(GPIOB,LL_GPIO_PIN_3);
 }
 
-void Show_Pass_mode(void)
+void Pass_mode(void)
 {
-	//wait for enable buzzer
+	//LL_GPIO_SetOutputPin(GPIOA,LL_GPIO_PIN_5);
+	LL_GPIO_SetOutputPin(GPIOB,LL_GPIO_PIN_3);
+	countTime();
+	//LL_GPIO_ResetOutputPin(GPIOA,LL_GPIO_PIN_5);
+	LL_GPIO_ResetOutputPin(GPIOB,LL_GPIO_PIN_3);
+	LL_GPIO_ResetOutputPin(GPIOB,LL_GPIO_PIN_5);
+	LL_GPIO_SetOutputPin(GPIOB,LL_GPIO_PIN_4);
 	LL_mDelay(1000);
-	//enable buzzer
-	LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_5);
-	//wait for show "PASS" at lcd
-	LL_mDelay(1000);
-	sprintf(disp_str,"PASS");
-	LCD_GLASS_DisplayString((uint8_t*)disp_str);
-	//enable led at PB7 and disable led at PB6
-	LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_5);	
-	LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_7);
-	LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_6);
-	//counting number
-	counting_sec();//counting number
-	LL_mDelay(1000); //set counting for PASS
-	//enable buzzer for 1 sec
-	LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_5);
-	LL_mDelay(1000);
-	LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_5);
-	//reset lcd showing	
-	sprintf(disp_str,"    ");
-	LCD_GLASS_DisplayString((uint8_t*)disp_str);
+	LL_GPIO_ResetOutputPin(GPIOB,LL_GPIO_PIN_4);
 }
 
 void SystemClock_Config(void)
